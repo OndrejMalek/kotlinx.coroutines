@@ -128,6 +128,7 @@ allprojects {
         google()
         mavenCentral()
         maven { url "https://maven.pkg.jetbrains.space/kotlin/p/kotlin/dev" }
+        mavenLocal() // for testing manually-built dependencies, such as Lincheck
     }
 }
 

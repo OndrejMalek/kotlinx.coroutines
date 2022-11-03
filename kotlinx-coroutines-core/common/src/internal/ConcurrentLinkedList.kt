@@ -157,10 +157,10 @@ internal abstract class ConcurrentLinkedListNode<N : ConcurrentLinkedListNode<N>
             val prev = aliveSegmentLeft
             val next = aliveSegmentRight
             // Link `next` and `prev`.
-            next._prev.value = prev
+            next._prev.update { if (it === null) null else prev }
             if (prev !== null) prev._next.value = next
             // Checks that prev and next are still alive.
-            if (next.removed) continue
+            if (next.removed && !next.isTail) continue
             if (prev !== null && prev.removed) continue
             // This node is removed.
             return
@@ -178,7 +178,7 @@ internal abstract class ConcurrentLinkedListNode<N : ConcurrentLinkedListNode<N>
         assert { !isTail } // Should not be invoked on the tail node
         var cur = next!!
         while (cur.removed)
-            cur = cur.next!!
+            cur = cur.next ?: return cur
         return cur
     }
 }

@@ -61,10 +61,7 @@ class ConflatedBroadcastChannelLincheckTest : ChannelLincheckTestBaseAll(
     c = ChannelViaBroadcast(ConflatedBroadcastChannel()),
     sequentialSpecification = SequentialConflatedChannel::class.java,
     obstructionFree = false
-) {
-    @Operation
-    override fun trySend(value: Int) = super.trySend(value)
-}
+)
 class SequentialConflatedChannel : SequentialIntChannelBase(CONFLATED)
 
 abstract class ChannelLincheckTestBaseAll(
@@ -144,16 +141,16 @@ abstract class ChannelLincheckTestBase(
         e.testResult
     }
 
-    @Operation(causesBlocking = true)
+    @Operation(causesBlocking = true, blocking = true)
     fun close(@Param(name = "closeToken") token: Int): Boolean = c.close(NumberedCancellationException(token))
 
-    @Operation(causesBlocking = true)
+    @Operation(causesBlocking = true, blocking = true)
     fun cancel(@Param(name = "closeToken") token: Int) = c.cancel(NumberedCancellationException(token))
 
     // @Operation TODO non-linearizable in BufferedChannel
     open fun isClosedForReceive() = c.isClosedForReceive
 
-    @Operation
+    @Operation(blocking = true)
     fun isClosedForSend() = c.isClosedForSend
 
     // @Operation TODO non-linearizable in BufferedChannel
@@ -161,6 +158,11 @@ abstract class ChannelLincheckTestBase(
 
     @StateRepresentation
     fun state() = c.toString()
+
+    @Validate
+    fun validate() {
+        (c as? BufferedChannel<*>)?.checkSegmentStructure()
+    }
 
     override fun <O : Options<O, *>> O.customize(isStressTest: Boolean) =
         actorsBefore(0).sequentialSpecification(sequentialSpecification)

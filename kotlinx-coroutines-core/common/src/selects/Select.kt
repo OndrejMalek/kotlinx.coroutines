@@ -556,6 +556,7 @@ internal open class SelectImplementation<R> constructor(
      */
     private fun reregisterClause(clauseObject: Any) {
         val clause = findClause(clauseObject)!! // it is guaranteed that the corresponding clause is presented
+        clause.disposableHandle?.dispose()
         clause.disposableHandle = null
         clause.register(reregister = true)
     }

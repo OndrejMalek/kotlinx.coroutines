@@ -22,7 +22,7 @@ abstract class AbstractLincheckTest : VerifierState() {
         .customize(isStressTest)
         .check(this::class)
 
-    @Test
+//    @Test
     fun stressTest() = StressOptions()
         .iterations(if (isStressTest) 100 else 20)
         .invocationsPerIteration(if (isStressTest) 10_000 else 1_000)
@@ -35,6 +35,7 @@ abstract class AbstractLincheckTest : VerifierState() {
         .threads(3)
         .actorsPerThread(if (isStressTest) 4 else 2)
         .actorsAfter(if (isStressTest) 3 else 0)
+        .logLevel(LoggingLevel.INFO)
         .customize(isStressTest)
 
     override fun extractState(): Any = error("Not implemented")

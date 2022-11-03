@@ -34,6 +34,7 @@ class ArrayChannelTest : TestBase() {
         sender.join()
         receiver.join()
         check(q.isEmpty)
+        (q as BufferedChannel<*>).checkSegmentStructure()
         finish(10)
     }
 
@@ -59,6 +60,7 @@ class ArrayChannelTest : TestBase() {
         check(!q.isEmpty && q.isClosedForSend && !q.isClosedForReceive)
         yield()
         check(!q.isEmpty && q.isClosedForSend && q.isClosedForReceive)
+        (q as BufferedChannel<*>).checkSegmentStructure()
         finish(8)
     }
 
@@ -81,6 +83,7 @@ class ArrayChannelTest : TestBase() {
         expect(6)
         try { q.send(42) }
         catch (e: ClosedSendChannelException) {
+            (q as BufferedChannel<*>).checkSegmentStructure()
             finish(7)
         }
     }
@@ -112,6 +115,7 @@ class ArrayChannelTest : TestBase() {
         expect(8)
         assertFalse(q.trySend(4).isSuccess)
         yield()
+        (q as BufferedChannel<*>).checkSegmentStructure()
         finish(12)
     }
 
@@ -135,6 +139,7 @@ class ArrayChannelTest : TestBase() {
         check(q.isClosedForSend)
         check(q.isClosedForReceive)
         assertFailsWith<CancellationException> { q.receiveCatching().getOrThrow() }
+        (q as BufferedChannel<*>).checkSegmentStructure()
         finish(12)
     }
 
@@ -194,6 +199,7 @@ class ArrayChannelTest : TestBase() {
             result.add(it)
         }
         assertEquals((0..capacity).toList(), result)
+        (channel as BufferedChannel<*>).checkSegmentStructure()
         finish(6)
     }
 }

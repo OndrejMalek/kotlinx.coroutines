@@ -76,6 +76,9 @@ def configureKotlinJvmPlatform(configuration) {
     configuration.attributes.attribute(KotlinPlatformType.attribute, KotlinPlatformType.jvm)
 }
 
+// Configure subprojects with Kotlin sources
+apply plugin: "configure-compilation-conventions"
+
 allprojects {
     // the only place where HostManager could be instantiated
     project.ext.hostManager = new HostManager()
@@ -168,9 +171,6 @@ configure(subprojects.findAll { !sourceless.contains(it.name) && it.name != core
 
 apply plugin: "bom-conventions"
 
-// Configure subprojects with Kotlin sources
-apply plugin: "configure-compilation-conventions"
-
 if (build_snapshot_train) {
     println "Hacking test tasks, removing stress and flaky tests"
     allprojects {
@@ -225,9 +225,8 @@ def core_docs_file = "$projectDir/kotlinx-coroutines-core/build/dokka/htmlPartia
 apply plugin: "org.jetbrains.dokka"
 
 configure(subprojects.findAll { !unpublished.contains(it.name)
-        && it.name != coreModule
-        && it.name != jdk8ObsoleteModule}) {
-    if (it.name != 'kotlinx-coroutines-bom') {
+        && it.name != coreModule }) {
+    if (it.name != 'kotlinx-coroutines-bom' && it.name != jdk8ObsoleteModule) {
         apply from: rootProject.file('gradle/dokka.gradle.kts')
     }
     apply from: rootProject.file('gradle/publish.gradle')

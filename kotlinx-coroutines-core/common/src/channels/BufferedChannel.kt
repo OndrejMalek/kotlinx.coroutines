@@ -1351,7 +1351,7 @@ internal open class BufferedChannel<E>(
             },
             onSuspend = { _, _ -> error("unreachable") },
             onClosed = { onCloseHasNext() },
-            onNoWaiterSuspend = { segm, i, r -> hasNextOnNoWaiterSuspend(segm, i, r) }
+            onNoWaiterSuspend = { segm, i, r -> return hasNextOnNoWaiterSuspend(segm, i, r) }
         )
 
         private fun onCloseHasNext(): Boolean {

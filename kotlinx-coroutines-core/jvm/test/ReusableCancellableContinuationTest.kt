@@ -43,7 +43,7 @@ class ReusableCancellableContinuationTest : TestBase() {
             }
         }
         channel.close()
-        assertEquals(expectedInstances, result.size)
+        assertEquals(expectedInstances, result.size - 1)
     }
 
     @Test
@@ -213,6 +213,6 @@ class ReusableCancellableContinuationTest : TestBase() {
         for (value in channel) {
             delay(1)
         }
-        FieldWalker.assertReachableCount(0, coroutineContext[Job]) { it is ChildContinuation }
+        FieldWalker.assertReachableCount(1, coroutineContext[Job]) { it is ChildContinuation }
     }
 }

@@ -18,7 +18,7 @@ class BroadcastTest : TestBase() {
             expect(4)
             send(1) // goes to receiver
             expect(5)
-            select<Unit> { onSend(2) {} } // goes to buffer
+            select { onSend(2) {} } // goes to buffer
             expect(6)
             send(3) // suspends, will not be consumes, but will not be cancelled either
             expect(10)

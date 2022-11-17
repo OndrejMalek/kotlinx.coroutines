@@ -22,7 +22,7 @@ abstract class AbstractLincheckTest : VerifierState() {
         .customize(isStressTest)
         .check(this::class)
 
-//    @Test
+    @Test
     fun stressTest() = StressOptions()
         .iterations(if (isStressTest) 100 else 20)
         .invocationsPerIteration(if (isStressTest) 10_000 else 1_000)
@@ -32,8 +32,13 @@ abstract class AbstractLincheckTest : VerifierState() {
 
     private fun <O : Options<O, *>> O.commonConfiguration(): O = this
         .actorsBefore(if (isStressTest) 3 else 1)
+        // All the bugs we have discovered so far
+        // were reproducible on at most 3 threads
         .threads(3)
-        .actorsPerThread(if (isStressTest) 4 else 2)
+        // 3 operations per thread is sufficient,
+        // while increasing this number declines
+        // the model checking coverage.
+        .actorsPerThread(if (isStressTest) 3 else 2)
         .actorsAfter(if (isStressTest) 3 else 0)
         .logLevel(LoggingLevel.INFO)
         .customize(isStressTest)

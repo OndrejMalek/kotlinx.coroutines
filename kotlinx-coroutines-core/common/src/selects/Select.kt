@@ -556,7 +556,6 @@ internal open class SelectImplementation<R> constructor(
      */
     private fun reregisterClause(clauseObject: Any) {
         val clause = findClause(clauseObject)!! // it is guaranteed that the corresponding clause is presented
-        clause.disposableHandle?.dispose()
         clause.disposableHandle = null
         clause.register(reregister = true)
     }
@@ -706,7 +705,7 @@ internal open class SelectImplementation<R> constructor(
         // Update the state.
         state.update { cur ->
             // Finish immediately when this `select` is already completed.
-            if (cur == STATE_COMPLETED) return
+            if (cur === STATE_COMPLETED) return
             STATE_CANCELLED
         }
         // Read the list of clauses. If the `clauses` field is already `null`,

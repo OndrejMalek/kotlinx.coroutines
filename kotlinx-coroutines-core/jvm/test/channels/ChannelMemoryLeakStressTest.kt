@@ -13,9 +13,9 @@ class ChannelMemoryLeakStressTest : TestBase()  {
 
     @Test
     fun test() = runTest {
-        val c = Channel<Int>(1)
-        repeat(nRepeat) { value ->
-            c.send(value)
+        val c = Channel<Any>(1)
+        repeat(nRepeat) {
+            c.send(bigValue())
             c.receive()
         }
     }

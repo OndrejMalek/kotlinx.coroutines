@@ -148,7 +148,7 @@ internal abstract class ConcurrentLinkedListNode<N : ConcurrentLinkedListNode<N>
      * logically removed (so [removed] returns `true`) at the point of invocation.
      */
     fun remove() {
-        assert { removed } // The node should be logically removed at first.
+        assert { removed || isTail } // The node should be logically removed at first.
         // The physical tail cannot be removed. Instead, we remove it when
         // a new segment is added and this segment is not the tail one anymore.
         if (isTail) return
@@ -207,10 +207,10 @@ internal abstract class Segment<S : Segment<S>>(val id: Long, prev: S?, pointers
     override val removed get() = cleanedAndPointers.value == numberOfSlots
 
     // increments the number of pointers if this segment is not logically removed.
-    internal fun tryIncPointers() = cleanedAndPointers.addConditionally(1 shl POINTERS_SHIFT) { it != numberOfSlots }
+    internal fun tryIncPointers() = cleanedAndPointers.addConditionally(1 shl POINTERS_SHIFT) { it != numberOfSlots || isTail }
 
     // returns `true` if this segment is logically removed after the decrement.
-    internal fun decPointers() = cleanedAndPointers.addAndGet(-(1 shl POINTERS_SHIFT)) == numberOfSlots
+    internal fun decPointers() = cleanedAndPointers.addAndGet(-(1 shl POINTERS_SHIFT)) == numberOfSlots && !isTail
 
     /**
      * Invoked on each slot clean-up; should not be invoked twice for the same slot.

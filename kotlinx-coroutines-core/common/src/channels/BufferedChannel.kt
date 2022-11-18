@@ -1575,6 +1575,7 @@ internal open class BufferedChannel<E>(
         while (true) {
             segm = segm.next ?: break
         }
+        val startSegm = segm
         val limit = receivers.value
         while (true) {
             for (i in SEGMENT_SIZE - 1 downTo 0) {
@@ -1621,8 +1622,12 @@ internal open class BufferedChannel<E>(
             }
             segm = segm.prev ?: break
         }
-//        val rcvSegment = receiveSegment.value
-//        if (segm.id > rcvSegment.id) error("WTF is going on??!!")
+        segm = startSegm
+        while (true) {
+            val segmPrev = segm.prev ?: break
+            segm.cleanPrev()
+            segm = segmPrev
+        }
         undeliveredElementException?.let { throw it } // throw UndeliveredElementException at the end if there was one
     }
 
@@ -1662,6 +1667,12 @@ internal open class BufferedChannel<E>(
                 }
             }
             segm = segm.prev
+        }
+        segm = lastSegment
+        while (true) {
+            val segmPrev = segm!!.prev ?: break
+            segm.cleanPrev()
+            segm = segmPrev
         }
     }
 
@@ -1843,12 +1854,14 @@ internal open class BufferedChannel<E>(
         @Suppress("INFERRED_TYPE_VARIABLE_INTO_POSSIBLE_EMPTY_INTERSECTION")
         return sendSegment.findSegmentAndMoveForward(id, start, ::createSegment).let {
             if (it.isClosed) {
+                if (start.id * SEGMENT_SIZE < receiversCounter) start.cleanPrev()
                 completeCloseOrCancel()
                 null
             } else {
                 val segm = it.segment
                 if (segm.id != id) {
                     assert { segm.id > id }
+                    if (segm.id * SEGMENT_SIZE < receiversCounter) segm.cleanPrev()
                     updateSendersIfLower(segm.id * SEGMENT_SIZE)
                     if (closed && id * SEGMENT_SIZE < receiversCounter) {
                         segm.cleanPrev()
@@ -1870,7 +1883,7 @@ internal open class BufferedChannel<E>(
                 val segm = it.segment
                 if (segm.id != id) {
                     assert { segm.id > id }
-                    if (isClosedForReceive && segm.id * SEGMENT_SIZE < sendersCounter) segm.cleanPrev()
+                    if (segm.id * SEGMENT_SIZE < sendersCounter) segm.cleanPrev()
                     updateReceiversIfLower(segm.id * SEGMENT_SIZE)
                     null
                 } else segm

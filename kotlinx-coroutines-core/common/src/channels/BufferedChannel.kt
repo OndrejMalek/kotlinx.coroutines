@@ -302,7 +302,7 @@ internal open class BufferedChannel<E>(
             // one (in the beginning of this function) has lower id.
             if (segment.id != id) {
                 // Find the required segment.
-                segment = findSegmentSend(id, segment) ?:
+                segment = findSegmentSend(id, segment, closed) ?:
                     // The required segment has not been found.
                     // Finish immediately if this channel is closed,
                     // restarting the operation otherwise.
@@ -486,9 +486,13 @@ internal open class BufferedChannel<E>(
                 }
                 // The channel is already closed.
                 state === CHANNEL_CLOSED -> {
-                    // Clean the element slot to avoid memory leaks and finish.
+                    // Clean the element slot to avoid memory leaks,
+                    // ensure that the closing/cancellation procedure
+                    // has been completed, and finish.
                     segment.cleanElement(index)
                     completeCloseOrCancel()
+                    // TODO comment
+                    if (s < receiversCounter) segment.cleanPrev()
                     return RESULT_CLOSED
                 }
                 // A waiting receiver is stored in the cell.
@@ -797,7 +801,10 @@ internal open class BufferedChannel<E>(
         while (true) {
             // Similar to the `send(e)` operation, `receive()` first checks
             // whether the channel is already closed for receiving.
-            if (sendersAndCloseStatus.value.isClosedForReceive0) return onClosed()
+            if (sendersAndCloseStatus.value.isClosedForReceive0) {
+                if (segment.id * SEGMENT_SIZE < sendersCounter) segment.cleanPrev()
+                return onClosed()
+            }
             // Atomically increments the `receivers` counter
             // and obtain the value right before the increment.
             val r = this.receivers.getAndIncrement()
@@ -1832,7 +1839,7 @@ internal open class BufferedChannel<E>(
     // # Segments Management #
     // #######################
 
-    private fun findSegmentSend(id: Long, start: ChannelSegment<E>): ChannelSegment<E>? {
+    private fun findSegmentSend(id: Long, start: ChannelSegment<E>, closed: Boolean): ChannelSegment<E>? {
         @Suppress("INFERRED_TYPE_VARIABLE_INTO_POSSIBLE_EMPTY_INTERSECTION")
         return sendSegment.findSegmentAndMoveForward(id, start, ::createSegment).let {
             if (it.isClosed) {
@@ -1843,6 +1850,9 @@ internal open class BufferedChannel<E>(
                 if (segm.id != id) {
                     assert { segm.id > id }
                     updateSendersIfLower(segm.id * SEGMENT_SIZE)
+                    if (closed && id * SEGMENT_SIZE < receiversCounter) {
+                        segm.cleanPrev()
+                    }
                     null
                 } else segm
             }
@@ -1853,12 +1863,14 @@ internal open class BufferedChannel<E>(
         @Suppress("INFERRED_TYPE_VARIABLE_INTO_POSSIBLE_EMPTY_INTERSECTION")
         receiveSegment.findSegmentAndMoveForward(id, start, ::createSegment).let {
             if (it.isClosed) {
+                if (start.id * SEGMENT_SIZE < sendersCounter) start.cleanPrev()
                 completeCloseOrCancel()
                 null
             } else {
                 val segm = it.segment
                 if (segm.id != id) {
                     assert { segm.id > id }
+                    if (isClosedForReceive && segm.id * SEGMENT_SIZE < sendersCounter) segm.cleanPrev()
                     updateReceiversIfLower(segm.id * SEGMENT_SIZE)
                     null
                 } else segm
@@ -1941,9 +1953,9 @@ internal open class BufferedChannel<E>(
         val firstSegment = listOf(receiveSegment.value, sendSegment.value, bufferEndSegment.value)
             .filter { it !== NULL_SEGMENT }
             .minBy { it.id }
-//        check(firstSegment.prev == null) {
-//            "All processed segments should be unreachable from the data structure, but the `prev` link of the leftmost segment is non-null"
-//        }
+        check(firstSegment.prev == null) {
+            "All processed segments should be unreachable from the data structure, but the `prev` link of the leftmost segment is non-null"
+        }
         var segment = firstSegment
         while (segment.next != null) {
 //            check(segment.next!!.prev !== null) {

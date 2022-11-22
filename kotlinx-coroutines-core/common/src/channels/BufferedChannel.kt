@@ -36,7 +36,7 @@ internal open class BufferedChannel<E>(
      * Channel capacity; `Channel.RENDEZVOUS` for rendezvous channel
      * and `Channel.UNLIMITED` for unlimited capacity.
      */
-    capacity: Int,
+    private val capacity: Int,
     @JvmField
     internal val onUndeliveredElement: OnUndeliveredElement<E>? = null
 ) : Channel<E> {
@@ -549,7 +549,7 @@ internal open class BufferedChannel<E>(
      * its element to the working cell without suspension.
      */
     private fun bufferOrRendezvousSend(curSenders: Long): Boolean =
-        curSenders < bufferEnd.value || curSenders < receivers.value
+        curSenders < bufferEnd.value || curSenders < receivers.value + capacity
 
     /**
      * Checks whether a [send] invocation is bound to suspend if it is called
@@ -2119,7 +2119,7 @@ private val NULL_SEGMENT = createSegment<Any?>(-1, null)
  */
 private val SEGMENT_SIZE = systemProp("kotlinx.coroutines.bufferedChannel.segmentSize2", 1)
 
-private val EXPAND_BUFFER_COMPLETION_WAIT_ITERATIONS = systemProp("kotlinx.coroutines.bufferedChannel.expandBufferCompletionWaitIterations", 1)
+private val EXPAND_BUFFER_COMPLETION_WAIT_ITERATIONS = systemProp("kotlinx.coroutines.bufferedChannel.expandBufferCompletionWaitIterations", 10_000)
 
 /**
  * Tries to resume this continuation with the specified

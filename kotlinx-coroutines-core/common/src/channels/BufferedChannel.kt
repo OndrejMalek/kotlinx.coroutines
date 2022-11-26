@@ -316,7 +316,7 @@ internal open class BufferedChannel<E>(
             // Update the cell according to the algorithm. Importantly, when
             // the channel is already closed, storing a waiter is illegal, so
             // the algorithm stores the `INTERRUPTED_SEND` token in this case.
-            when(updateCellSend(segment, i, element, s, if (closed) INTERRUPTED_SEND else waiter)) {
+            when(updateCellSend(segment, i, element, s, if (closed) INTERRUPTED_SEND else waiter, closed)) {
                 RESULT_RENDEZVOUS -> {
                     // A rendezvous with a receiver has happened.
                     // Also, the previous segments are no longer needed
@@ -384,7 +384,7 @@ internal open class BufferedChannel<E>(
         // Update the cell again, now with the non-null waiter,
         // restarting the operation from the beginning on failure.
         // Check the `sendImpl(..)` function for the comments.
-        when(updateCellSend(segment, index, element, s, waiter)) {
+        when(updateCellSend(segment, index, element, s, waiter, false)) {
             RESULT_RENDEZVOUS -> {
                 segment.cleanPrev()
                 onRendezvousOrBuffered()
@@ -426,6 +426,7 @@ internal open class BufferedChannel<E>(
         s: Long,
         /* The waiter to be stored in case of suspension. */
         waiter: Any?,
+        closed: Boolean
     ): Int {
         // First, the algorithm stores the element,
         // performing the synchronization after that.
@@ -444,7 +445,7 @@ internal open class BufferedChannel<E>(
                     // If the element should be buffered, or a rendezvous should happen
                     // while the receiver is still coming, try to buffer the element.
                     // Otherwise, try to store the specified waiter in the cell.
-                    if (bufferOrRendezvousSend(s)) {
+                    if (bufferOrRendezvousSend(s) && !closed) {
                         // Move the cell state to `BUFFERED`.
                         if (segment.casState(index, null, BUFFERED)) {
                             // The element has been successfully buffered, finish.

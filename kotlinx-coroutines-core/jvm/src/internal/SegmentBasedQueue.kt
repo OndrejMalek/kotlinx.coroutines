@@ -25,7 +25,7 @@ internal class SegmentBasedQueue<T> {
     private val deqIdx = atomic(0L)
 
     init {
-        val s = OneElementSegment<T>(0, null, 2)
+        val s = OneElementSegment<T>(0, null)
         head = atomic(s)
         tail = atomic(s)
     }
@@ -109,9 +109,9 @@ internal class SegmentBasedQueue<T> {
 
 }
 
-private fun <T> createSegment(id: Long, prev: OneElementSegment<T>?) = OneElementSegment(id, prev, 0)
+private fun <T> createSegment(id: Long, prev: OneElementSegment<T>?) = OneElementSegment(id, prev)
 
-internal class OneElementSegment<T>(id: Long, prev: OneElementSegment<T>?, pointers: Int) : Segment<OneElementSegment<T>>(id, prev, pointers) {
+internal class OneElementSegment<T>(id: Long, prev: OneElementSegment<T>?) : Segment<OneElementSegment<T>>(id, prev) {
     val element = atomic<Any?>(null)
 
     override val numberOfSlots get() = 1

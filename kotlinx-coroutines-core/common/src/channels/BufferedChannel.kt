@@ -99,7 +99,7 @@ internal open class BufferedChannel<E>(
 
     init {
         @Suppress("LeakingThis")
-        val firstSegment = ChannelSegment(id = 0, prev = null, channel = this)
+        val firstSegment = ChannelSegment(id = 0, prev = null, channel = this, pointers = 3)
         sendSegment = atomic(firstSegment)
         receiveSegment = atomic(firstSegment)
         // If this channel is rendezvous or has unlimited capacity, the algorithm never
@@ -1065,12 +1065,9 @@ internal open class BufferedChannel<E>(
             if (s <= b) {
                 // Should `bufferEndSegment` be updated?
                 if (segment.id < id && segment.next != null) {
-                    while (true) {
-                        val ss = findSegmentBufferOrLast(id, segment)
-                        bufferEndSegment.moveForward(ss)
-                        incCompletedExpandBuffers()
-                        return
-                    }
+                    bufferEndSegment.moveForward(findSegmentBufferOrLast(id, segment))
+                    incCompletedExpandBuffers()
+                    return
                 } // to avoid memory leaks
                 incCompletedExpandBuffers()
                 return
@@ -1223,7 +1220,7 @@ internal open class BufferedChannel<E>(
         while (cur.id < id) {
             cur = cur.next ?: break
         }
-        while (cur.removed) {
+        while (cur.isRemoved) {
             cur = cur.next ?: break
         }
         return cur
@@ -1641,7 +1638,7 @@ internal open class BufferedChannel<E>(
         while (true) {
             segm = segm.next ?: break
         }
-        val startSegm = segm
+//        val startSegm = segm
         val limit = receivers.value
         while (true) {
             for (i in SEGMENT_SIZE - 1 downTo 0) {
@@ -1688,12 +1685,12 @@ internal open class BufferedChannel<E>(
             }
             segm = segm.prev ?: break
         }
-        segm = startSegm
-        while (true) {
-            val segmPrev = segm.prev ?: break
-            segm.cleanPrev()
-            segm = segmPrev
-        }
+//        segm = startSegm
+//        while (true) {
+//            val segmPrev = segm.prev ?: break
+//            segm.cleanPrev()
+//            segm = segmPrev
+//        }
         undeliveredElementException?.let { throw it } // throw UndeliveredElementException at the end if there was one
     }
 
@@ -1707,23 +1704,20 @@ internal open class BufferedChannel<E>(
                     when {
                         state === null || state === IN_BUFFER -> {
                             if (segm.casState(i, state, CHANNEL_CLOSED)) {
-                                waitExpandBufferCompletion(segm.id * SEGMENT_SIZE + i)
                                 segm.onSlotCleaned()
                                 break@cell
                             }
                         }
                         state is WaiterEB -> {
                             if (segm.casState(i, state, CHANNEL_CLOSED)) {
-                                if (state.waiter.closeReceiver()) expandBuffer()
-                                waitExpandBufferCompletion(segm.id * SEGMENT_SIZE + i)
+                                state.waiter.closeReceiver()
                                 segm.onSlotCleaned()
                                 break@cell
                             }
                         }
                         state is Waiter -> {
                             if (segm.casState(i, state, CHANNEL_CLOSED)) {
-                                if (state.closeReceiver()) expandBuffer()
-                                waitExpandBufferCompletion(segm.id * SEGMENT_SIZE + i)
+                                state.closeReceiver()
                                 segm.onSlotCleaned()
                                 break@cell
                             }
@@ -1734,12 +1728,12 @@ internal open class BufferedChannel<E>(
             }
             segm = segm.prev
         }
-        segm = lastSegment
-        while (true) {
-            val segmPrev = segm!!.prev ?: break
-            segm.cleanPrev()
-            segm = segmPrev
-        }
+//        segm = lastSegment
+//        while (true) {
+//            val segmPrev = segm!!.prev ?: break
+//            segm.cleanPrev()
+//            segm = segmPrev
+//        }
     }
 
     private fun Waiter.closeReceiver() = closeWaiter(receiver = true)
@@ -1910,14 +1904,14 @@ internal open class BufferedChannel<E>(
     private fun findSegmentSend(id: Long, start: ChannelSegment<E>, closed: Boolean): ChannelSegment<E>? {
         return sendSegment.findSegmentAndMoveForward(id, start, ::createSegment).let {
             if (it.isClosed) {
-                if (start.id * SEGMENT_SIZE <= receiversCounter) start.cleanPrev()
+                if (start.id * SEGMENT_SIZE <  receiversCounter) start.cleanPrev()
                 completeCloseOrCancel()
                 null
             } else {
                 val segm = it.segment
                 if (segm.id != id) {
                     assert { segm.id > id }
-                    if (segm.id * SEGMENT_SIZE <= receiversCounter) segm.cleanPrev()
+                    if (segm.id * SEGMENT_SIZE <  receiversCounter) segm.cleanPrev()
                     updateSendersIfLower(segm.id * SEGMENT_SIZE)
                     if (closed && id * SEGMENT_SIZE < receiversCounter) {
                         segm.cleanPrev()
@@ -1931,14 +1925,14 @@ internal open class BufferedChannel<E>(
     private fun findSegmentReceive(id: Long, start: ChannelSegment<E>) =
         receiveSegment.findSegmentAndMoveForward(id, start, ::createSegment).let {
             if (it.isClosed) {
-                if (start.id * SEGMENT_SIZE <= sendersCounter) start.cleanPrev()
+                if (start.id * SEGMENT_SIZE < sendersCounter) start.cleanPrev()
                 completeCloseOrCancel()
                 null
             } else {
                 val segm = it.segment
                 if (segm.id != id) {
                     assert { segm.id > id }
-                    if (segm.id * SEGMENT_SIZE <= sendersCounter) segm.cleanPrev()
+                    if (segm.id * SEGMENT_SIZE <  sendersCounter) segm.cleanPrev()
                     updateReceiversIfLower(segm.id * SEGMENT_SIZE)
                     null
                 } else segm
@@ -1984,7 +1978,7 @@ internal open class BufferedChannel<E>(
         sb.append("S=${sendersAndCloseStatus.value.counter},R=${receivers.value},B=${bufferEnd.value},B'=${completedExpandBuffers.value},C=${sendersAndCloseStatus.value.closeStatus},")
         sb.append("S_SEGM=${sendSegment.value.hexAddress},R_SEGM=${receiveSegment.value.hexAddress},B_SEGM=${bufferEndSegment.value.let { if (it === NULL_SEGMENT) "NULL" else it.hexAddress }}  ")
         while (true) {
-            sb.append("${cur.hexAddress}=[${cur.id},prev=${cur.prev?.hexAddress},")
+            sb.append("${cur.hexAddress}=[${if (cur.isRemoved) "*" else ""}${cur.id},prev=${cur.prev?.hexAddress},")
             repeat(SEGMENT_SIZE) { i ->
                 val w = cur.getState(i)
                 val e = cur.getElement(i)
@@ -1997,7 +1991,7 @@ internal open class BufferedChannel<E>(
                     else -> w.toString()
                 }
                 val eString = e.toString()
-                sb.append("[$i$]=($wString,$eString),")
+                sb.append("[$i]=($wString,$eString),")
             }
             sb.append("next=${cur.next?.hexAddress}]  ")
             cur = cur.next ?: break
@@ -2027,9 +2021,9 @@ internal open class BufferedChannel<E>(
 //            check(segment.next!!.prev !== null) {
 //                "`segm.next.prev` is null"
 //            }
-//            check(segment.next!!.prev === segment) {
-//                "The `segm.next.prev === segm` invariant is violated"
-//            }
+            check(segment.next!!.prev == null || segment.next!!.prev === segment) {
+                "The `segm.next.prev === segm` invariant is violated"
+            }
             var interruptedOrClosed = 0
             for (i in 0 until SEGMENT_SIZE) {
                 val state = segment.getState(i)
@@ -2054,9 +2048,9 @@ internal open class BufferedChannel<E>(
             }
             // TODO: add the check below
             if (interruptedOrClosed == SEGMENT_SIZE) {
-//                check(segment === receiveSegment.value || segment === sendSegment.value || segment === bufferEndSegment.value) {
-//                    "logically removed segment is reachable"
-//                }
+                check(segment === receiveSegment.value || segment === sendSegment.value || segment === bufferEndSegment.value) {
+                    "logically removed segment is reachable"
+                }
             }
             segment = segment.next!!
         }
@@ -2069,15 +2063,12 @@ internal open class BufferedChannel<E>(
  * to update [BufferedChannel.sendSegment], [BufferedChannel.receiveSegment],
  * and [BufferedChannel.bufferEndSegment] correctly.
  */
-internal class ChannelSegment<E>(
-    id: Long, prev: ChannelSegment<E>?,
-    channel: BufferedChannel<E>?
-) : Segment<ChannelSegment<E>>(id, prev) {
+internal class ChannelSegment<E>(id: Long, prev: ChannelSegment<E>?, channel: BufferedChannel<E>?, pointers: Int) : Segment<ChannelSegment<E>>(id, prev, pointers) {
+    private val _channel: BufferedChannel<E>? = channel
+    val channel get() = _channel!! // always non-null except for `NULL_SEGMENT`
+
     private val data = atomicArrayOfNulls<Any?>(SEGMENT_SIZE * 2) // 2 registers per slot: state + element
     override val numberOfSlots: Int get() = SEGMENT_SIZE
-
-    private val _channel = channel
-    val channel: BufferedChannel<E> get() = _channel!! // always non-null except for `NULL_SEGMENT`
 
     // ########################################
     // # Manipulation with the Element Fields #
@@ -2160,18 +2151,15 @@ internal class ChannelSegment<E>(
         }
         return update
     }
-
-    override fun onSlotCleaned(): Boolean = super.onSlotCleaned().also { removed ->
-        if (removed) {
-            channel.sendSegmentUpdateIfRemoved(this)
-            channel.receiveSegmentUpdateIfRemoved(this)
-            channel.bufferEndSegmentUpdateIfRemoved(this)
-        }
-    }
 }
-private fun <E> createSegment(id: Long, prev: ChannelSegment<E>) = ChannelSegment(id, prev, prev.channel)
+private fun <E> createSegment(id: Long, prev: ChannelSegment<E>) = ChannelSegment(
+    id = id,
+    prev = prev,
+    channel = prev.channel,
+    pointers = 0
+)
 
-private val NULL_SEGMENT = ChannelSegment<Any?>(id = -1, prev = null, channel = null)
+private val NULL_SEGMENT = ChannelSegment<Any?>(id = -1, prev = null, channel = null, pointers = 0)
 
 /**
  * Number of cells in each segment.

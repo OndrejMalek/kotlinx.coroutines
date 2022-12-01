@@ -82,7 +82,7 @@ abstract class ChannelLincheckTestBaseWithOnSend(
     sequentialSpecification: Class<*>,
     obstructionFree: Boolean = true
 ) : ChannelLincheckTestBase(c, sequentialSpecification, obstructionFree) {
-    @Operation(allowExtraSuspension = true, blocking = true)
+//    @Operation(allowExtraSuspension = true, blocking = true)
     suspend fun sendViaSelect(@Param(name = "value") value: Int): Any = try {
         select<Unit> { c.onSend(value) {} }
     } catch (e: NumberedCancellationException) {
@@ -134,7 +134,7 @@ abstract class ChannelLincheckTestBase(
             .onSuccess { return it }
             .onFailure { return if (it is NumberedCancellationException) it.testResult else null }
 
-    @Operation(allowExtraSuspension = true, blocking = true)
+//    @Operation(allowExtraSuspension = true, blocking = true)
     suspend fun receiveViaSelect(): Any = try {
         select<Int> { c.onReceive { it } }
     } catch (e: NumberedCancellationException) {

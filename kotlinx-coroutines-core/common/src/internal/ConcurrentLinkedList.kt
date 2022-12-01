@@ -22,7 +22,7 @@ private inline fun <S : Segment<S>> S.findSegmentInternal(
        added, so the algorithm just uses it. This way, only one segment with each id can be added.
      */
     var cur: S = this
-    while (cur.id < id) {
+    while (cur.id < id || cur.isRemoved) {
         val next = cur.nextOrIfClosed { return SegmentOrClosed(CLOSED) }
         if (next != null) { // there is a next node -- move there
             cur = next
@@ -30,7 +30,7 @@ private inline fun <S : Segment<S>> S.findSegmentInternal(
         }
         val newTail = createNewSegment(cur.id + 1, cur)
         if (cur.trySetNext(newTail)) { // successfully added new node -- move there
-            if (cur.removed) cur.remove()
+            if (cur.isRemoved) cur.remove()
             cur = newTail
         }
     }
@@ -41,18 +41,19 @@ private inline fun <S : Segment<S>> S.findSegmentInternal(
  * Returns `false` if the segment `to` is logically removed, `true` on a successful update.
  */
 @Suppress("NOTHING_TO_INLINE", "RedundantNullableReturnType") // Must be inline because it is an AtomicRef extension
-internal inline fun <S : Segment<S>> AtomicRef<S>.moveForward(to: S): S {
-    loop { cur ->
-        if (cur.id >= to.id) return cur
-        if (compareAndSet(cur, to)) { // the segment is moved
-            return to
-        }
+internal inline fun <S : Segment<S>> AtomicRef<S>.moveForward(to: S): Boolean = loop { cur ->
+    if (cur.id >= to.id) return true
+    if (!to.tryIncPointers()) return false
+    if (compareAndSet(cur, to)) { // the segment is moved
+        if (cur.decPointers()) cur.remove()
+        return true
     }
+    if (to.decPointers()) to.remove() // undo tryIncPointers
 }
 
 /**
  * Tries to find a segment with the specified [id] following by next references from the
- * [startFrom] segment, creating new ones if needed. The typical use-case is reading this `AtomicRef` values,
+ * [startFrom] segment and creating new ones if needed. The typical use-case is reading this `AtomicRef` values,
  * doing some synchronization, and invoking this function to find the required segment and update the pointer.
  * At the same time, [Segment.cleanPrev] should also be invoked if the previous segments are no longer needed
  * (e.g., queues should use it in dequeue operations).
@@ -66,9 +67,10 @@ internal inline fun <S : Segment<S>> AtomicRef<S>.findSegmentAndMoveForward(
     startFrom: S,
     createNewSegment: (id: Long, prev: S) -> S
 ): SegmentOrClosed<S> {
-    val s = startFrom.findSegmentInternal(id, createNewSegment)
-    if (!s.isClosed) moveForward(s.segment)
-    return s
+    while (true) {
+        val s = startFrom.findSegmentInternal(id, createNewSegment)
+        if (s.isClosed || moveForward(s.segment)) return s
+    }
 }
 
 /**
@@ -134,53 +136,50 @@ internal abstract class ConcurrentLinkedListNode<N : ConcurrentLinkedListNode<N>
 
     /**
      * This property indicates whether the current node is logically removed.
-     * The expected use-case is removing the node logically (so that [removed] becomes true),
+     * The expected use-case is removing the node logically (so that [isRemoved] becomes true),
      * and invoking [remove] after that. Note that this implementation relies on the contract
      * that the physical tail cannot be logically removed. Please, do not break this contract;
      * otherwise, memory leaks and unexpected behavior can occur.
      */
-    abstract val removed: Boolean
+    abstract val isRemoved: Boolean
 
     /**
      * Removes this node physically from this linked list. The node should be
-     * logically removed (so [removed] returns `true`) at the point of invocation.
+     * logically removed (so [isRemoved] returns `true`) at the point of invocation.
      */
     fun remove() {
-        assert { removed } // The node should be logically removed.
-        // The physical tail cannot be removed. Instead,
+        assert { isRemoved || isTail } // The node should be logically removed at first.
+        // The physical tail cannot be removed. Instead, we remove it when
+        // a new segment is added and this segment is not the tail one anymore.
         if (isTail) return
         while (true) {
-            // Find the first non-removed node on the right
-            // following the `next` references, or the tail.
-            // In case this segment is the tail, do not remove it physically;
-            // we remove it later, when a new segment is added and this one
-            // is not the tail anymore.
-            var next = next ?: return
-            while (next.removed) {
-                next = next.next ?: break
-            }
-            // Find the first non-removed node on the left following
-            // the `prev` references, or the last node if all of them
-            // are already removed.
-            var prev = prev ?: return // do not remove the head physically
-            while (prev.removed) {
-                prev = prev.prev ?: break
-            }
-            // Check that prev is still reachable from next.
-            var cur = next
-            while (cur !== prev) {
-                cur = cur.prev ?: return
-            }
+            // Read `next` and `prev` pointers ignoring logically removed nodes.
+            val prev = aliveSegmentLeft
+            val next = aliveSegmentRight
             // Link `next` and `prev`.
             next._prev.update { if (it === null) null else prev }
-            prev._next.value = next
-            // Checks that prev and next are still
-            // not removed, restarting otherwise.
-            if (next.removed && !next.isTail) continue
-            if (prev.removed && prev.prev != null) continue
-            // This node is successfully removed.
+            if (prev !== null) prev._next.value = next
+            // Checks that prev and next are still alive.
+            if (next.isRemoved && !next.isTail) continue
+            if (prev !== null && prev.isRemoved) continue
+            // This node is removed.
             return
         }
+    }
+
+    private val aliveSegmentLeft: N? get() {
+        var cur = prev
+        while (cur !== null && cur.isRemoved)
+            cur = cur._prev.value
+        return cur
+    }
+
+    private val aliveSegmentRight: N get() {
+        assert { !isTail } // Should not be invoked on the tail node
+        var cur = next!!
+        while (cur.isRemoved)
+            cur = cur.next ?: return cur
+        return cur
     }
 }
 
@@ -189,7 +188,7 @@ internal abstract class ConcurrentLinkedListNode<N : ConcurrentLinkedListNode<N>
  * Essentially, this is a node in the Michael-Scott queue algorithm,
  * but with maintaining [prev] pointer for efficient [remove] implementation.
  */
-internal abstract class Segment<S : Segment<S>>(val id: Long, prev: S?): ConcurrentLinkedListNode<S>(prev) {
+internal abstract class Segment<S : Segment<S>>(val id: Long, prev: S?, pointers: Int): ConcurrentLinkedListNode<S>(prev) {
     /**
      * This property should return the number of slots in this segment,
      * it is used to define whether the segment is logically removed.
@@ -199,21 +198,34 @@ internal abstract class Segment<S : Segment<S>>(val id: Long, prev: S?): Concurr
     /**
      * Numbers of cleaned slots (the lowest bits) and AtomicRef pointers to this segment (the highest bits)
      */
-    private val cleanedSlots = atomic(0)
+    private val cleanedAndPointers = atomic(pointers shl POINTERS_SHIFT)
 
     /**
      * The segment is considered as removed if all the slots are cleaned
      * and there are no pointers to this segment from outside.
      */
-    override val removed get() = cleanedSlots.value == numberOfSlots
+    override val isRemoved get() = cleanedAndPointers.value == numberOfSlots && !isTail
+
+    // increments the number of pointers if this segment is not logically removed.
+    internal fun tryIncPointers() = cleanedAndPointers.addConditionally(1 shl POINTERS_SHIFT) { it != numberOfSlots || isTail }
+
+    // returns `true` if this segment is logically removed after the decrement.
+    internal fun decPointers() = cleanedAndPointers.addAndGet(-(1 shl POINTERS_SHIFT)) == numberOfSlots && !isTail
 
     /**
      * Invoked on each slot clean-up; should not be invoked twice for the same slot.
      */
-    open fun onSlotCleaned(): Boolean =
-        (cleanedSlots.incrementAndGet() == numberOfSlots).also { logicallyRemoved ->
-            if (logicallyRemoved) remove()
-        }
+    fun onSlotCleaned() {
+        if (cleanedAndPointers.incrementAndGet() == numberOfSlots) remove()
+    }
+}
+
+private inline fun AtomicInt.addConditionally(delta: Int, condition: (cur: Int) -> Boolean): Boolean {
+    while (true) {
+        val cur = this.value
+        if (!condition(cur)) return false
+        if (this.compareAndSet(cur, cur + delta)) return true
+    }
 }
 
 @JvmInline
@@ -222,5 +234,7 @@ internal value class SegmentOrClosed<S : Segment<S>>(private val value: Any?) {
     @Suppress("UNCHECKED_CAST")
     val segment: S get() = if (value === CLOSED) error("Does not contain segment") else value as S
 }
+
+private const val POINTERS_SHIFT = 16
 
 private val CLOSED = Symbol("CLOSED")

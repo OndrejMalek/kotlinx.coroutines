@@ -135,7 +135,7 @@ internal open class SemaphoreImpl(private val permits: Int, acquiredPermits: Int
     init {
         require(permits > 0) { "Semaphore should have at least 1 permit, but had $permits" }
         require(acquiredPermits in 0..permits) { "The number of acquired permits should be in 0..$permits" }
-        val s = SemaphoreSegment(0, null)
+        val s = SemaphoreSegment(0, null, 2)
         head = atomic(s)
         tail = atomic(s)
     }
@@ -284,11 +284,9 @@ internal open class SemaphoreImpl(private val permits: Int, acquiredPermits: Int
     private fun addAcquireToQueue(waiter: Any): Boolean {
         val curTail = this.tail.value
         val enqIdx = enqIdx.getAndIncrement()
-        val id = enqIdx / SEGMENT_SIZE
-        val i = (enqIdx % SEGMENT_SIZE).toInt()
-        val segment = this.tail.findSegmentAndMoveForward(id = id, startFrom = curTail,
+        val segment = this.tail.findSegmentAndMoveForward(id = enqIdx / SEGMENT_SIZE, startFrom = curTail,
             createNewSegment = ::createSegment).segment // cannot be closed
-        assert { segment.id == id }
+        val i = (enqIdx % SEGMENT_SIZE).toInt()
         // the regular (fast) path -- if the cell is empty, try to install continuation
         if (segment.cas(i, null, waiter)) { // installed continuation successfully
             when (waiter) {
@@ -377,9 +375,9 @@ private class CancelSemaphoreAcquisitionHandler(
     override fun toString() = "CancelSemaphoreAcquisitionHandler[$segment, $index]"
 }
 
-private fun createSegment(id: Long, prev: SemaphoreSegment) = SemaphoreSegment(id, prev)
+private fun createSegment(id: Long, prev: SemaphoreSegment) = SemaphoreSegment(id, prev, 0)
 
-private class SemaphoreSegment(id: Long, prev: SemaphoreSegment?) : Segment<SemaphoreSegment>(id, prev) {
+private class SemaphoreSegment(id: Long, prev: SemaphoreSegment?, pointers: Int) : Segment<SemaphoreSegment>(id, prev, pointers) {
     val acquirers = atomicArrayOfNulls<Any?>(SEGMENT_SIZE)
     override val numberOfSlots: Int get() = SEGMENT_SIZE
 

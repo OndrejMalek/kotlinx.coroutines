@@ -470,7 +470,10 @@ internal open class BufferedChannel<E>(
                         // is installed instead.
                         when {
                             // The channel is closed
-                            closed -> if (segment.casState(index, null, INTERRUPTED_SEND)) return RESULT_CLOSED
+                            closed -> if (segment.casState(index, null, INTERRUPTED_SEND)) {
+                                segment.onCancelledRequest(index, false)
+                                return RESULT_CLOSED
+                            }
                             // The waiter is not specified; return the corresponding result.
                             waiter == null -> return RESULT_SUSPEND_NO_WAITER
                             // Try to install the waiter.
@@ -528,8 +531,9 @@ internal open class BufferedChannel<E>(
                         // and clean the element field. It is also possible for a concurrent
                         // `expandBuffer()` or the cancellation handler to update the cell state;
                         // we can safely ignore these updates as senders dot help `expandBuffer()`.
-                        segment.setState(index, INTERRUPTED_RCV)
-                        segment.cleanElement(index)
+                        if (segment.casState(index, state, INTERRUPTED_RCV)) {
+                            segment.onCancelledRequest(index, true)
+                        }
                         RESULT_FAILED
                     }
                 }
@@ -1017,6 +1021,7 @@ internal open class BufferedChannel<E>(
                             // its completion, the procedure should skip this cell, so
                             // `expandBuffer()` should be called once again.
                             segment.setState(index, INTERRUPTED_SEND)
+                            segment.onCancelledRequest(index, false)
                             if (helpExpandBuffer) expandBuffer()
                             FAILED
                         }
@@ -1154,6 +1159,7 @@ internal open class BufferedChannel<E>(
                             } else {
                                 // The resumption has failed.
                                 segment.setState(index, INTERRUPTED_SEND)
+                                segment.onCancelledRequest(index, false)
                                 false
                             }
                         }
@@ -2137,6 +2143,7 @@ internal class ChannelSegment<E>(id: Long, prev: ChannelSegment<E>?, channel: Bu
                     if (isSender) INTERRUPTED_SEND else if (isReceiver) INTERRUPTED_RCV else cur
                 }
                 cur === S_RESUMING_EB || cur === S_RESUMING_RCV -> continue
+                cur === INTERRUPTED_SEND || cur === INTERRUPTED_RCV -> return cur
                 else -> cur
             }
             if (data[index * 2 + 1].compareAndSet(cur, update)) break
@@ -2146,10 +2153,15 @@ internal class ChannelSegment<E>(id: Long, prev: ChannelSegment<E>?, channel: Bu
         // Inform the segment that one more slot has been cleaned.
         if (update == INTERRUPTED_SEND) onSlotCleaned()
         if (update == INTERRUPTED_RCV) {
-            channel.waitExpandBufferCompletion(globalIndex)
             onSlotCleaned()
         }
         return update
+    }
+
+    fun onCancelledRequest(index: Int, receiver: Boolean) {
+        if (receiver) channel.waitExpandBufferCompletion(id * SEGMENT_SIZE + index)
+        cleanElement(index)
+        onSlotCleaned()
     }
 }
 private fun <E> createSegment(id: Long, prev: ChannelSegment<E>) = ChannelSegment(

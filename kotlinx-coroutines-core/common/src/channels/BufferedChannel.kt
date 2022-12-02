@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.internal.*
 import kotlinx.coroutines.internal.*
 import kotlinx.coroutines.selects.*
 import kotlinx.coroutines.selects.TrySelectDetailedResult.*
+import kotlin.contracts.*
 import kotlin.coroutines.*
 import kotlin.js.*
 import kotlin.jvm.*
@@ -198,7 +199,7 @@ internal open class BufferedChannel<E>(
         private val context: CoroutineContext
     ) : BeforeResumeCancelHandler(), DisposableHandle {
         override fun dispose() {
-            segment.onCancellationSendWithOnUndeliveredElement(index, context)
+            segment.onSenderCancellationWithOnUndeliveredElement(index, context)
         }
         override fun invoke(cause: Throwable?) = dispose()
     }
@@ -531,7 +532,7 @@ internal open class BufferedChannel<E>(
                         // and clean the element field. It is also possible for a concurrent
                         // `expandBuffer()` or the cancellation handler to update the cell state;
                         // we can safely ignore these updates as senders dot help `expandBuffer()`.
-                        if (segment.casState(index, state, INTERRUPTED_RCV)) {
+                        if (segment.getAndSetState(index, INTERRUPTED_RCV) !== INTERRUPTED_RCV) {
                             segment.onCancelledRequest(index, true)
                         }
                         RESULT_FAILED
@@ -1004,7 +1005,7 @@ internal open class BufferedChannel<E>(
                         val helpExpandBuffer = state is WaiterEB
                         // Extract the sender if needed and try to resume it.
                         val sender = if (state is WaiterEB) state.waiter else state
-                        return if (sender.tryResumeSender()) {
+                        return if (sender.tryResumeSender(segment, index)) {
                             // The sender has been resumed successfully!
                             // Update the cell state correspondingly,
                             // expand the buffer, and return the element
@@ -1031,13 +1032,18 @@ internal open class BufferedChannel<E>(
         }
     }
 
-    private fun Any.tryResumeSender(): Boolean = when (this) {
+    private fun Any.tryResumeSender(segment: ChannelSegment<E>, index: Int): Boolean = when (this) {
         is CancellableContinuation<*> -> { // suspended `send(e)` operation
             @Suppress("UNCHECKED_CAST")
             this as CancellableContinuation<Unit>
             tryResume0(Unit)
         }
-        is SelectInstance<*> -> trySelect(clauseObject = this@BufferedChannel, result = Unit)
+        is SelectInstance<*> -> {
+            this as SelectImplementation<*>
+            val trySelectResult = trySelectDetailed(clauseObject = this@BufferedChannel, result = Unit)
+            if (trySelectResult === REREGISTER) segment.cleanElement(index)
+            trySelectResult === SUCCESSFUL
+        }
         is SendBroadcast -> cont.tryResume0(true) // // suspended `sendBroadcast(e)` operation
         else -> error("Unexpected waiter: $this")
     }
@@ -1151,7 +1157,7 @@ internal open class BufferedChannel<E>(
                         // state, updating it to either `BUFFERED` (on successful resumption)
                         // or `INTERRUPTED_SEND` (on failure).
                         if (segment.casState(index, state, S_RESUMING_EB)) {
-                            return if (state.tryResumeSender()) {
+                            return if (state.tryResumeSender(segment, index)) {
                                 // The sender has been resumed successfully!
                                 // Move the cell to the logical buffer and finish.
                                 segment.setState(index, BUFFERED)
@@ -2041,6 +2047,7 @@ internal open class BufferedChannel<E>(
                         // TODO
                     }
                     INTERRUPTED_RCV, INTERRUPTED_SEND, CHANNEL_CLOSED -> {
+                        check(segment.getElement(i) == null)
                         interruptedOrClosed++
                     }
                     is WaiterEB -> error("The cell state is WaiterEB, which is a special state to solve when race when " +
@@ -2052,7 +2059,6 @@ internal open class BufferedChannel<E>(
                     else -> error("Unexpected segment cell state: $state")
                 }
             }
-            // TODO: add the check below
             if (interruptedOrClosed == SEGMENT_SIZE) {
                 check(segment === receiveSegment.value || segment === sendSegment.value || segment === bufferEndSegment.value) {
                     "logically removed segment is reachable"
@@ -2109,14 +2115,16 @@ internal class ChannelSegment<E>(id: Long, prev: ChannelSegment<E>?, channel: Bu
 
     internal fun casState(index: Int, from: Any?, to: Any?) = data[index * 2 + 1].compareAndSet(from, to)
 
+    internal fun getAndSetState(index: Int, update: Any?) = data[index * 2 + 1].getAndSet(update)
+
+
     // ########################
     // # Cancellation Support #
     // ########################
 
-    fun onCancellationSendWithOnUndeliveredElement(index: Int, context: CoroutineContext) {
+    fun onSenderCancellationWithOnUndeliveredElement(index: Int, context: CoroutineContext) {
         val element = getElement(index)
-        val update = onCancellationImpl(index)
-        if (update === INTERRUPTED_SEND || update is Waiter || update is WaiterEB) {
+        if (onCancellationImpl(index)) {
             channel.onUndeliveredElement!!.callUndeliveredElement(element, context)
         }
     }
@@ -2125,42 +2133,50 @@ internal class ChannelSegment<E>(id: Long, prev: ChannelSegment<E>?, channel: Bu
         onCancellationImpl(index)
     }
 
-    // Returns the cell state at the point of this cancellation handler call.
     @Suppress("ConvertTwoComparisonsToRangeCheck")
-    private fun onCancellationImpl(index: Int): Any? {
+
+    private fun onCancellationImpl(index: Int): Boolean {
         // Update the cell state first.
-        var update: Any?
         val globalIndex = id * SEGMENT_SIZE + index
         val s = channel.sendersCounter
         val r = channel.receiversCounter
 
+        var isSender: Boolean
+        var isReceiver: Boolean
+
         while (true) {
             val cur = data[index * 2 + 1].value
-            update = when {
+            when {
                 cur is Waiter || cur is WaiterEB -> {
-                    val isSender = globalIndex < s && globalIndex >= r
-                    val isReceiver = globalIndex < r && globalIndex >= s
-                    if (isSender) INTERRUPTED_SEND else if (isReceiver) INTERRUPTED_RCV else cur
+                    isSender = globalIndex < s && globalIndex >= r
+                    isReceiver = globalIndex < r && globalIndex >= s
+                    if (!isSender && !isReceiver) {
+                        cleanElement(index)
+                        return true
+                    }
+                    val update = if (isSender) INTERRUPTED_SEND else INTERRUPTED_RCV
+                    if (data[index * 2 + 1].compareAndSet(cur, update)) break
+                }
+
+                cur === INTERRUPTED_SEND || cur === INTERRUPTED_RCV -> {
+                    cleanElement(index)
+                    return true
                 }
                 cur === S_RESUMING_EB || cur === S_RESUMING_RCV -> continue
-                cur === INTERRUPTED_SEND || cur === INTERRUPTED_RCV -> return cur
-                else -> cur
+                cur === DONE_RCV || cur === BUFFERED -> return false
+                cur === CHANNEL_CLOSED -> {
+                    return false
+                }
+                else -> error("unexpected state: $cur")
             }
-            if (data[index * 2 + 1].compareAndSet(cur, update)) break
         }
-        // Clean the element slot.
-        if (update === INTERRUPTED_SEND || update === INTERRUPTED_RCV) cleanElement(index)
-        // Inform the segment that one more slot has been cleaned.
-        if (update == INTERRUPTED_SEND) onSlotCleaned()
-        if (update == INTERRUPTED_RCV) {
-            onSlotCleaned()
-        }
-        return update
+        cleanElement(index)
+        onCancelledRequest(index, isReceiver)
+        return true
     }
 
     fun onCancelledRequest(index: Int, receiver: Boolean) {
         if (receiver) channel.waitExpandBufferCompletion(id * SEGMENT_SIZE + index)
-        cleanElement(index)
         onSlotCleaned()
     }
 }

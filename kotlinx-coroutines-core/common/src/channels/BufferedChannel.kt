@@ -1638,42 +1638,44 @@ internal open class BufferedChannel<E>(
         while (true) {
             segm = segm.next ?: break
         }
-//        val startSegm = segm
         val limit = receivers.value
         while (true) {
-            for (i in SEGMENT_SIZE - 1 downTo 0) {
-                if (segm.id * SEGMENT_SIZE + i < limit) return
+            for (index in SEGMENT_SIZE - 1 downTo 0) {
+                if (segm.id * SEGMENT_SIZE + index < limit) return
                 update_cell@while (true) {
-                    val state = segm.getState(i)
+                    val state = segm.getState(index)
                     when {
                         state === DONE_RCV -> break@update_cell
-                        state === BUFFERED -> if (segm.casState(i, state, CHANNEL_CLOSED)) {
+                        state === BUFFERED -> if (segm.casState(index, state, CHANNEL_CLOSED)) {
                             if (onUndeliveredElement != null) {
-                                undeliveredElementException = onUndeliveredElement.callUndeliveredElementCatchingException(segm.retrieveElement(i), undeliveredElementException)
+                                undeliveredElementException = onUndeliveredElement.callUndeliveredElementCatchingException(segm.retrieveElement(index), undeliveredElementException)
                             }
+                            segm.cleanElement(index)
                             segm.onSlotCleaned()
                             break@update_cell
                         }
-                        state === IN_BUFFER || state === null -> if (segm.casState(i, state, CHANNEL_CLOSED)) {
+                        state === IN_BUFFER || state === null -> if (segm.casState(index, state, CHANNEL_CLOSED)) {
                             segm.onSlotCleaned()
                             break@update_cell
                         }
                         state is Waiter -> {
-                            if (segm.casState(i, state, CHANNEL_CLOSED)) {
+                            if (segm.casState(index, state, CHANNEL_CLOSED)) {
                                 if (onUndeliveredElement != null) {
-                                    undeliveredElementException = onUndeliveredElement.callUndeliveredElementCatchingException(segm.retrieveElement(i), undeliveredElementException)
+                                    undeliveredElementException = onUndeliveredElement.callUndeliveredElementCatchingException(segm.retrieveElement(index), undeliveredElementException)
                                 }
+                                segm.cleanElement(index)
                                 state.closeSender()
                                 segm.onSlotCleaned()
                                 break@update_cell
                             }
                         }
                         state is WaiterEB -> {
-                            if (segm.casState(i, state, CHANNEL_CLOSED)) {
+                            if (segm.casState(index, state, CHANNEL_CLOSED)) {
                                 if (onUndeliveredElement != null) {
-                                    undeliveredElementException = onUndeliveredElement.callUndeliveredElementCatchingException(segm.retrieveElement(i), undeliveredElementException)
+                                    undeliveredElementException = onUndeliveredElement.callUndeliveredElementCatchingException(segm.retrieveElement(index), undeliveredElementException)
                                 }
                                 state.waiter.closeSender()
+                                segm.cleanElement(index)
                                 segm.onSlotCleaned()
                                 break@update_cell
                             }
@@ -1685,12 +1687,6 @@ internal open class BufferedChannel<E>(
             }
             segm = segm.prev ?: break
         }
-//        segm = startSegm
-//        while (true) {
-//            val segmPrev = segm.prev ?: break
-//            segm.cleanPrev()
-//            segm = segmPrev
-//        }
         undeliveredElementException?.let { throw it } // throw UndeliveredElementException at the end if there was one
     }
 
@@ -1728,12 +1724,6 @@ internal open class BufferedChannel<E>(
             }
             segm = segm.prev
         }
-//        segm = lastSegment
-//        while (true) {
-//            val segmPrev = segm!!.prev ?: break
-//            segm.cleanPrev()
-//            segm = segmPrev
-//        }
     }
 
     private fun Waiter.closeReceiver() = closeWaiter(receiver = true)

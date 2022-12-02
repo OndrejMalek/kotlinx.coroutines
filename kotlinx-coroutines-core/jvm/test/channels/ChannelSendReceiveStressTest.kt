@@ -104,6 +104,7 @@ class ChannelSendReceiveStressTest(
         repeat(nReceivers) { receiveIndex ->
             println("        Received by #$receiveIndex ${receivedBy[receiveIndex]}")
         }
+        (channel as? BufferedChannel<*>)?.checkSegmentStructure()
         assertEquals(nSenders, sendersCompleted.get())
         assertEquals(nReceivers, receiversCompleted.get())
         assertEquals(0, dupes.get())

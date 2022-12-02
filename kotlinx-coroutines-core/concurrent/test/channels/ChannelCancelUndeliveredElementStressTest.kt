@@ -51,6 +51,7 @@ class ChannelCancelUndeliveredElementStressTest : TestBase() {
                 println("   Undelivered: ${dUndeliveredCnt.value}")
                 error("Failed")
             }
+            (channel as? BufferedChannel<*>)?.checkSegmentStructure()
             trySendFailedCnt += dTrySendFailedCnt
             receivedCnt += dReceivedCnt
             undeliveredCnt += dUndeliveredCnt.value

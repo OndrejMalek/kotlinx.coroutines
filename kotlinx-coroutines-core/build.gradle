@@ -268,7 +268,8 @@ task jvmStressTest(type: Test, dependsOn: compileTestKotlinJvm) {
     // Adjust internal algorithmic parameters to increase the testing quality instead of performance.
     systemProperty 'kotlinx.coroutines.semaphore.segmentSize', '1'
     systemProperty 'kotlinx.coroutines.semaphore.maxSpinCycles', '10'
-    systemProperty 'kotlinx.coroutines.bufferedChannel.segmentSize', '1'
+    systemProperty 'kotlinx.coroutines.bufferedChannel.segmentSize', '2'
+    systemProperty 'kotlinx.coroutines.bufferedChannel.expandBufferCompletionWaitIterations', '1'
 }
 
 task jvmLincheckTest(type: Test, dependsOn: compileTestKotlinJvm) {
@@ -301,6 +302,7 @@ static void configureJvmForLincheck(task, additional = false) {
     task.systemProperty 'kotlinx.coroutines.semaphore.segmentSize', segmentSize
     task.systemProperty 'kotlinx.coroutines.semaphore.maxSpinCycles', '1' // better for the model checking mode
     task.systemProperty 'kotlinx.coroutines.bufferedChannel.segmentSize', segmentSize
+    task.systemProperty 'kotlinx.coroutines.bufferedChannel.expandBufferCompletionWaitIterations', '1'
 }
 
 // Always check additional test sets

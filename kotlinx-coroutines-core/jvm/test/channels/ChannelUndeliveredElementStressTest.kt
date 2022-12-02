@@ -116,6 +116,7 @@ class ChannelUndeliveredElementStressTest(private val kind: TestChannelKind) : T
             printErrorDetails()
             throw e
         }
+        (channel as? BufferedChannel<*>)?.checkSegmentStructure()
         sentStatus.clear()
         receivedStatus.clear()
         failedStatus.clear()

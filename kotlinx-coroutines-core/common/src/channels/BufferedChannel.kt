@@ -86,18 +86,6 @@ internal open class BufferedChannel<E>(
     private val receiveSegment: AtomicRef<ChannelSegment<E>>
     private val bufferEndSegment: AtomicRef<ChannelSegment<E>>
 
-    fun sendSegmentUpdateIfRemoved(removedSegment: ChannelSegment<E>) {
-        if (sendSegment.value === removedSegment) sendSegment.moveForward(removedSegment)
-    }
-
-    fun receiveSegmentUpdateIfRemoved(removedSegment: ChannelSegment<E>) {
-        if (receiveSegment.value === removedSegment) receiveSegment.moveForward(removedSegment)
-    }
-
-    fun bufferEndSegmentUpdateIfRemoved(removedSegment: ChannelSegment<E>) {
-        if (bufferEndSegment.value === removedSegment) bufferEndSegment.moveForward(removedSegment)
-    }
-
     init {
         @Suppress("LeakingThis")
         val firstSegment = ChannelSegment(id = 0, prev = null, channel = this, pointers = 3)
@@ -2030,6 +2018,7 @@ internal open class BufferedChannel<E>(
         }
         var segment = firstSegment
         while (segment.next != null) {
+//            THIS IS POSSIBLE AFTER CLOSING
 //            check(segment.next!!.prev !== null) {
 //                "`segm.next.prev` is null"
 //            }

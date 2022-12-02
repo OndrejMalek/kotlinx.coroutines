@@ -519,7 +519,7 @@ internal open class BufferedChannel<E>(
                         // The resumption has failed. Update the cell state correspondingly
                         // and clean the element field. It is also possible for a concurrent
                         // `expandBuffer()` or the cancellation handler to update the cell state;
-                        // we can safely ignore these updates as senders dot help `expandBuffer()`.
+                        // we can safely ignore these updates as senders do not help `expandBuffer()`.
                         if (segment.getAndSetState(index, INTERRUPTED_RCV) !== INTERRUPTED_RCV) {
                             segment.onCancelledRequest(index, true)
                         }
@@ -1830,7 +1830,7 @@ internal open class BufferedChannel<E>(
                 // complete with `false`.
                 segm = findSegmentHasElements(id, segm).let {
                     if (it.isClosed) return false
-                    if (!isRendezvousOrUnlimited && it.segment.id <= bufferEndCounter / SEGMENT_SIZE) {
+                    if (!isRendezvousOrUnlimited && id <= bufferEndCounter / SEGMENT_SIZE) {
                         bufferEndSegment.moveForward(it.segment)
                     }
                     if (it.segment.id != id) {
@@ -1924,8 +1924,19 @@ internal open class BufferedChannel<E>(
                     assert { segm.id > id }
                     if (segm.id * SEGMENT_SIZE <  sendersCounter) segm.cleanPrev()
                     updateReceiversIfLower(segm.id * SEGMENT_SIZE)
+
+                    if (!isRendezvousOrUnlimited && id <= bufferEndCounter / SEGMENT_SIZE) {
+                        bufferEndSegment.moveForward(it.segment)
+                    }
+
                     null
-                } else segm
+                } else {
+                    if (!isRendezvousOrUnlimited && id <= bufferEndCounter / SEGMENT_SIZE) {
+                        bufferEndSegment.moveForward(it.segment)
+                    }
+
+                    segm
+                }
             }
         }
 
@@ -1996,9 +2007,9 @@ internal open class BufferedChannel<E>(
             }
         } else {
             // OK because of isEmpty
-//            check(receiveSegment.value.id <= bufferEndSegment.value.id) {
-//                "bufferEndSegment should not have lower id than receiveSegment"
-//            }
+            check(receiveSegment.value.id <= bufferEndSegment.value.id) {
+                "bufferEndSegment should not have lower id than receiveSegment"
+            }
         }
         val firstSegment = listOf(receiveSegment.value, sendSegment.value, bufferEndSegment.value)
             .filter { it !== NULL_SEGMENT }

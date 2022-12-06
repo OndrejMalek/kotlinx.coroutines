@@ -425,7 +425,7 @@ of your machine you may need to tweak timeouts in this example to actually see n
 
 > Note that incrementing and decrementing `acquired` counter here from 100K coroutines is completely safe,
 > since it always happens from the same main thread. More on that will be explained in the chapter
-> on coroutine context.
+> [shared mutable state and concurrency].
 > 
 {type="note"}
 
@@ -493,5 +493,6 @@ This example always prints zero. Resources do not leak.
 [NonCancellable]: https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-non-cancellable/index.html
 [withTimeout]: https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/with-timeout.html
 [withTimeoutOrNull]: https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/with-timeout-or-null.html
+[shared mutable state and concurrency]: https://kotlinlang.org/docs/shared-mutable-state-and-concurrency.html
 
 <!--- END -->
